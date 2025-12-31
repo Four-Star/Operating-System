@@ -1,0 +1,83 @@
+// Per-CPU state
+struct cpu {
+  uchar apicid;                // Local APIC ID
+  struct context *scheduler;   // swtch() here to enter scheduler
+  struct taskstate ts;         // Used by x86 to find stack for interrupt
+  struct segdesc gdt[NSEGS];   // x86 global descriptor table
+  volatile uint started;       // Has the CPU started?
+  int ncli;                    // Depth of pushcli nesting.
+  int intena;                  // Were interrupts enabled before pushcli?
+  struct proc *proc;           // The process running on this cpu or null
+};
+
+extern struct cpu cpus[NCPU];
+extern int ncpu;
+
+//PAGEBREAK: 17
+// Saved registers for kernel context switches.
+// Don't need to save all the segment registers (%cs, etc),
+// because they are constant across kernel contexts.
+// Don't need to save %eax, %ecx, %edx, because the
+// x86 convention is that the caller has saved them.
+// Contexts are stored at the bottom of the stack they
+// describe; the stack pointer is the address of the context.
+// The layout of the context matches the layout of the stack in swtch.S
+// at the "Switch stacks" comment. Switch doesn't save eip explicitly,
+// but it is on the stack and allocproc() manipulates it.
+struct context {
+  uint edi;
+  uint esi;
+  uint ebx;
+  uint ebp;
+  uint eip;
+};
+
+enum procstate { UNUSED, EMBRYO, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
+
+// Per-process state
+struct proc {
+  uint sz;                     // Size of process memory (bytes)
+  pde_t* pgdir;                // Page table
+  char *kstack;                // Bottom of kernel stack for this process
+  enum procstate state;        // Process state
+  int pid;                     // Process ID
+  struct proc *parent;         // Parent process
+  struct trapframe *tf;        // Trap frame for current syscall
+  struct context *context;     // swtch() here to run process
+  void *chan;                  // If non-zero, sleeping on chan
+  int killed;                  // If non-zero, have been killed
+  struct file *ofile[NOFILE];  // Open files
+  struct inode *cwd;           // Current directory
+  char name[16];               // Process name (debugging)
+
+  // 수정한 부분, 변수 추가
+  int q_level;                 // 프로세스가 속한 큐의 레벨(0-4)
+  int cpu_burst;               // cpu에서 실행된 시간
+  int cpu_wait;                // cpu에서 대기한 시간 = 큐에서 대기한 시간
+  int io_wait_time;            // I/O 대기 시간
+  int end_time;                // 프로세스의 실행 종료 시간
+  int cpu_used;                // 얼마만큼 cpu를 썼는지, end_time을 판단할 시간
+};
+
+// Process memory is laid out contiguously, low addresses first:
+//   text
+//   original data and bss
+//   fixed-size stack
+//   expandable heap
+
+#define NQUEUE 4
+
+// 노드
+struct Node {
+  struct proc* process;
+  struct Node* next;
+};
+
+struct LinkedList {
+  struct Node* head;
+  int size;
+};
+
+void enqueue_process(struct proc *p);
+void dequeue_process(struct proc *p);
+void aging(void);
